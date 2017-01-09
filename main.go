@@ -90,3 +90,44 @@ func GetEvents(queue_id string, handler EventListener) {
 		}
 	}
 }
+
+type messageType string
+const (
+	privateMessage messageType = "private"
+	streamMessage  messageType = "stream"
+)
+
+type message struct {
+	Type messageType
+	Content string
+	StreamName, TopicName string
+	Usernames []string
+}
+
+func NewPrivateMessage(recipients []string) *message {
+	return &message{Type: privateMessage, Usernames: recipients}
+}
+
+func NewStreamMessage(stream, topic string) *message {
+	return &message{Type: streamMessage, StreamName: stream, TopicName: topic}
+}
+
+func SendMessage(msg *message) int {
+	v := url.Values{}
+	v.Set("type", string(msg.Type))
+	v.Set("content", msg.Content)
+	switch msg.Type {
+	case privateMessage:
+		recipients, _ := json.Marshal(msg.Usernames)
+		v.Set("to", string(recipients))
+	case streamMessage:
+		v.Set("to", msg.StreamName)
+		v.Set("subject", msg.TopicName)
+	}
+
+	bytes := api("api/v1/messages", "POST", v)
+	var res map[string]interface{}
+	json.Unmarshal(bytes, &res)
+
+	return int(res["id"].(float64))
+}
