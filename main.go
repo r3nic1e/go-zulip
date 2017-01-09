@@ -112,7 +112,7 @@ func NewStreamMessage(stream, topic string) *message {
 	return &message{Type: streamMessage, StreamName: stream, TopicName: topic}
 }
 
-func SendMessage(msg *message) int {
+func SendMessage(msg *message) {
 	v := url.Values{}
 	v.Set("type", string(msg.Type))
 	v.Set("content", msg.Content)
@@ -125,9 +125,5 @@ func SendMessage(msg *message) int {
 		v.Set("subject", msg.TopicName)
 	}
 
-	bytes := api("api/v1/messages", "POST", v)
-	var res map[string]interface{}
-	json.Unmarshal(bytes, &res)
-
-	return int(res["id"].(float64))
+	api("api/v1/messages", "POST", v)
 }
