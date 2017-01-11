@@ -6,81 +6,129 @@ import "io/ioutil"
 import "fmt"
 import "encoding/json"
 import "strconv"
-
-var BaseUrl string
-var authLogin, authPass string
+import "strings"
+import "time"
+import "github.com/davecgh/go-spew/spew"
 
 type EventListener interface {
-	HandleEvent(map[string]interface{}) bool
+	HandleEvent(EventResponse) bool
 }
 
-func SetBasicAuth(login, pass string) {
-	authLogin = login
-	authPass = pass
+type Zulip struct {
+	authLogin, authPass string
+	baseUrl             string
+	queueID             string
 }
 
-func api(url, method string, params url.Values) []byte {
+func NewZulipApi(baseUrl string) *Zulip {
+	return &Zulip{baseUrl: baseUrl}
+}
+
+func (z *Zulip) SetBasicAuth(login, pass string) {
+	z.authLogin = login
+	z.authPass = pass
+}
+
+func (z *Zulip) tryToCallApi(url, method string, params url.Values) []byte {
 	client := &http.Client{}
 
-	url = fmt.Sprintf("%s/%s?%s", BaseUrl, url, params.Encode())
+	url = fmt.Sprintf("%s/%s?%s", z.baseUrl, url, params.Encode())
+	fmt.Println(url)
 
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
-		panic(err)
+		return []byte{}
 	}
-	req.SetBasicAuth(authLogin, authPass)
+	req.SetBasicAuth(z.authLogin, z.authPass)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		return []byte{}
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		return []byte{}
 	}
 
 	return body
 }
 
-func Register(event_types []string) string {
+func (z *Zulip) api(url, method string, params url.Values) (bytes []byte, err error) {
+	for i := 0; i <= 5; i++ {
+		bytes = z.tryToCallApi(url, method, params)
+
+		var res BaseResponse
+		err = json.Unmarshal(bytes, &res)
+		if err != nil {
+			return
+		}
+		spew.Dump(res)
+
+		if res.Result == "error" {
+			if strings.HasPrefix(res.Msg, "API usage exceeded rate limit") {
+				time.Sleep(time.Second)
+				continue
+			}
+		}
+		return
+	}
+	return
+}
+
+func (z *Zulip) Register(event_types []string) string {
 	v := url.Values{}
 	json_types, _ := json.Marshal(event_types)
 	v.Set("event_types", string(json_types))
-	bytes := api("api/v1/register", "POST", v)
-	var res map[string]interface{}
-	json.Unmarshal(bytes, &res)
-	return res["queue_id"].(string)
+
+	bytes, err := z.api("api/v1/register", "POST", v)
+	if err != nil {
+		panic(err)
+	}
+
+	var res RegisterResponse
+	err = json.Unmarshal(bytes, &res)
+	if err != nil {
+		panic(err)
+	}
+
+	z.queueID = res.Queue_id
+	return res.Queue_id
 }
 
-func tryToGetEvents(queue_id, last_event_id string) map[string]interface{} {
+func (z *Zulip) tryToGetEvents(last_event_id string) []byte {
 	v := url.Values{}
-	v.Set("queue_id", queue_id)
+	v.Set("queue_id", z.queueID)
 	v.Set("last_event_id", last_event_id)
 
-	bytes := api("api/v1/events", "GET", v)
-	var res map[string]interface{}
-	json.Unmarshal(bytes, &res)
+	res, err := z.api("api/v1/events", "GET", v)
+	if err != nil {
+		panic(err)
+	}
 
 	return res
 }
 
-func GetEvents(queue_id string, handler EventListener) {
-	last_event_id := -1
+func (z *Zulip) GetEvents(handler EventListener) {
+	var last_event_id int64 = -1
 	for {
-		result := tryToGetEvents(queue_id, strconv.Itoa(last_event_id))
-		if result["result"] != "success" {
+		bytes := z.tryToGetEvents(strconv.FormatInt(last_event_id, 10))
+		var res EventsResponse
+		err := json.Unmarshal(bytes, &res)
+		if err != nil {
+			panic(err)
+		}
+
+		if res.Result != "success" {
 			continue
 		}
-		events := result["events"].([]interface{})
-		for _, e := range events {
-			event := e.(map[string]interface{})
-			id := int(event["id"].(float64))
-			if id > last_event_id {
-				last_event_id = id
+		events := res.Events
+		for _, event := range events {
+			if event.ID > last_event_id {
+				last_event_id = event.ID
 			}
-			if event["type"] == "heartbeat" {
+			if event.Type == "heartbeat" {
 				continue
 			}
 			result := handler.HandleEvent(event)
@@ -92,16 +140,17 @@ func GetEvents(queue_id string, handler EventListener) {
 }
 
 type messageType string
+
 const (
 	privateMessage messageType = "private"
 	streamMessage  messageType = "stream"
 )
 
 type message struct {
-	Type messageType
-	Content string
+	Type                  messageType
+	Content               string
 	StreamName, TopicName string
-	Usernames []string
+	Usernames             []string
 }
 
 func NewPrivateMessage(recipients []string) *message {
@@ -112,7 +161,7 @@ func NewStreamMessage(stream, topic string) *message {
 	return &message{Type: streamMessage, StreamName: stream, TopicName: topic}
 }
 
-func SendMessage(msg *message) {
+func (z *Zulip) SendMessage(msg *message) {
 	v := url.Values{}
 	v.Set("type", string(msg.Type))
 	v.Set("content", msg.Content)
@@ -125,5 +174,5 @@ func SendMessage(msg *message) {
 		v.Set("subject", msg.TopicName)
 	}
 
-	api("api/v1/messages", "POST", v)
+	z.api("api/v1/messages", "POST", v)
 }
