@@ -18,6 +18,7 @@ type Zulip struct {
 	authLogin, authPass string
 	baseUrl             string
 	queueID             string
+	Debug               bool
 }
 
 func NewZulipApi(baseUrl string) *Zulip {
@@ -33,7 +34,9 @@ func (z *Zulip) tryToCallApi(url, method string, params url.Values) []byte {
 	client := &http.Client{}
 
 	url = fmt.Sprintf("%s/%s?%s", z.baseUrl, url, params.Encode())
-	fmt.Println(url)
+	if z.Debug {
+		fmt.Println(url)
+	}
 
 	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
@@ -64,10 +67,15 @@ func (z *Zulip) api(url, method string, params url.Values) (bytes []byte, err er
 		if err != nil {
 			return
 		}
-		spew.Dump(res)
+		if z.Debug {
+			spew.Dump(res)
+		}
 
 		if res.Result == "error" {
 			if strings.HasPrefix(res.Msg, "API usage exceeded rate limit") {
+				if z.Debug {
+					fmt.Println("Exceeded API rate limit, sleeping for 1 second")
+				}
 				time.Sleep(time.Second)
 				continue
 			}
