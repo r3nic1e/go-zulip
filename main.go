@@ -65,7 +65,7 @@ func (z *Zulip) api(url, method string, params url.Values) (bytes []byte, err er
 		var res BaseResponse
 		err = json.Unmarshal(bytes, &res)
 		if err != nil {
-			return
+			continue
 		}
 		if z.Debug {
 			spew.Dump(res)
