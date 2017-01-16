@@ -65,6 +65,10 @@ func (z *Zulip) api(url, method string, params url.Values) (bytes []byte, err er
 		var res BaseResponse
 		err = json.Unmarshal(bytes, &res)
 		if err != nil {
+			if z.Debug {
+				fmt.Println("Failed to parse response")
+			}
+			time.Sleep(time.Second)
 			continue
 		}
 		if z.Debug {
