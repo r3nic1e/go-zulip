@@ -1,17 +1,20 @@
 package zulip
 
-import "net/http"
-import "net/url"
-import "io/ioutil"
-import "fmt"
-import "encoding/json"
-import "strconv"
-import "strings"
-import "time"
-import "github.com/davecgh/go-spew/spew"
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/davecgh/go-spew/spew"
+)
 
 type EventListener interface {
-	HandleEvent(EventResponse) bool
+	HandleEvent(*EventResponse) bool
 }
 
 type Zulip struct {
@@ -105,8 +108,8 @@ func (z *Zulip) Register(event_types []string) string {
 		panic(err)
 	}
 
-	z.queueID = res.Queue_id
-	return res.Queue_id
+	z.queueID = res.QueueID
+	return res.QueueID
 }
 
 func (z *Zulip) tryToGetEvents(last_event_id string) []byte {
@@ -149,42 +152,4 @@ func (z *Zulip) GetEvents(handler EventListener) {
 			}
 		}
 	}
-}
-
-type messageType string
-
-const (
-	privateMessage messageType = "private"
-	streamMessage  messageType = "stream"
-)
-
-type message struct {
-	Type                  messageType
-	Content               string
-	StreamName, TopicName string
-	Usernames             []string
-}
-
-func NewPrivateMessage(recipients []string) *message {
-	return &message{Type: privateMessage, Usernames: recipients}
-}
-
-func NewStreamMessage(stream, topic string) *message {
-	return &message{Type: streamMessage, StreamName: stream, TopicName: topic}
-}
-
-func (z *Zulip) SendMessage(msg *message) {
-	v := url.Values{}
-	v.Set("type", string(msg.Type))
-	v.Set("content", msg.Content)
-	switch msg.Type {
-	case privateMessage:
-		recipients, _ := json.Marshal(msg.Usernames)
-		v.Set("to", string(recipients))
-	case streamMessage:
-		v.Set("to", msg.StreamName)
-		v.Set("subject", msg.TopicName)
-	}
-
-	z.api("api/v1/messages", "POST", v)
 }
